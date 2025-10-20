@@ -217,7 +217,8 @@ export class ChatComponent implements OnInit, AfterViewChecked, OnDestroy {
   chatState: ChatState = {
     messages: [],
     isLoading: false,
-    isConnected: true
+    isConnected: true,
+    authenticated: false
   };
   
   private chatSubscription!: Subscription;

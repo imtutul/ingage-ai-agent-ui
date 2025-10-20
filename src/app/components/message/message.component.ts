@@ -1,17 +1,33 @@
 import { Component, Input } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Message } from '../../models/chat.models';
+import { SqlDisplayComponent } from '../sql-display/sql-display.component';
+import { DataPreviewComponent } from '../data-preview/data-preview.component';
 
 @Component({
   selector: 'app-message',
   standalone: true,
-  imports: [CommonModule],
+  imports: [CommonModule, SqlDisplayComponent, DataPreviewComponent],
   template: `
     <div class="message-container fade-in" [ngClass]="{'user-message': message.sender === 'user', 'agent-message': message.sender === 'agent'}">
       <div class="message-bubble">
         <div class="message-content">{{ message.content }}</div>
         <div class="message-timestamp">{{ formatTimestamp(message.timestamp) }}</div>
       </div>
+      
+      <!-- SQL Display (only for agent messages with query response) -->
+      <app-sql-display 
+        *ngIf="message.sender === 'agent' && message.queryResponse?.sqlQuery"
+        [sqlQuery]="message.queryResponse!.sqlQuery"
+        [stepsCount]="message.queryResponse!.stepsCount"
+        [runStatus]="message.queryResponse!.runStatus">
+      </app-sql-display>
+      
+      <!-- Data Preview (only for agent messages with data) -->
+      <app-data-preview
+        *ngIf="message.sender === 'agent' && message.queryResponse?.dataPreview"
+        [dataPreview]="message.queryResponse!.dataPreview">
+      </app-data-preview>
     </div>
   `,
   styles: [`

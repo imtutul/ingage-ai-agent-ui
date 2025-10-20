@@ -1,30 +1,42 @@
 import { Injectable } from '@angular/core';
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
-import { BehaviorSubject, Observable, catchError, of } from 'rxjs';
-import { Message, ChatState, ApiResponse } from '../models/chat.models';
+import { BehaviorSubject, Observable, catchError, of, tap } from 'rxjs';
+import { Message, ChatState, QueryResponse, User } from '../models/chat.models';
+import { environment } from '../../environments/environment';
 
+/**
+ * ChatService - API v2.0.0 Compatible
+ * 
+ * Handles chat messages and integrates with authenticated API
+ */
 @Injectable({
   providedIn: 'root'
 })
 export class ChatService {
-  private readonly API_BASE_URL = 'http://localhost:8000'; // Update with your backend URL
+  private readonly API_BASE_URL = environment.apiBaseUrl;
   
   private chatStateSubject = new BehaviorSubject<ChatState>({
     messages: [],
     isLoading: false,
-    isConnected: true
+    isConnected: true,
+    authenticated: false
   });
 
   public chatState$ = this.chatStateSubject.asObservable();
 
+  // Query history
+  private queryHistorySubject = new BehaviorSubject<QueryResponse[]>([]);
+  public queryHistory$ = this.queryHistorySubject.asObservable();
+
   constructor(private http: HttpClient) {
     this.initializeChat();
+    this.loadHistoryFromStorage();
   }
 
   private initializeChat(): void {
     const welcomeMessage: Message = {
       id: this.generateId(),
-      content: 'Hello! I\'m your Ingage AI agent. I\'m here to help answer your questions and provide assistance. What can I help you with today?',
+      content: 'Hello! I\'m your Ingage AI Agent. I\'m here to help answer your questions about your data.',
       timestamp: new Date(),
       sender: 'agent'
     };
@@ -32,6 +44,22 @@ export class ChatService {
     this.addMessage(welcomeMessage);
   }
 
+  /**
+   * Update authentication state
+   */
+  setAuthenticationState(authenticated: boolean, user?: User): void {
+    const currentState = this.chatStateSubject.value;
+    const updatedState: ChatState = {
+      ...currentState,
+      authenticated,
+      user
+    };
+    this.chatStateSubject.next(updatedState);
+  }
+
+  /**
+   * Send message and get query response
+   */
   sendMessage(content: string): void {
     const userMessage: Message = {
       id: this.generateId(),
@@ -88,53 +116,64 @@ export class ChatService {
     return Date.now().toString(36) + Math.random().toString(36).substr(2);
   }
 
-  // Method for backend integration
+  /**
+   * Send query to authenticated API
+   * API: POST /query
+   * Requires: Authentication (cookie-based)
+   */
   private sendToBackend(message: string): void {
     const requestPayload = {
       query: message
     };
 
-    this.http.post<any>(`${this.API_BASE_URL}/query`, requestPayload)
+    this.http.post<QueryResponse>(`${this.API_BASE_URL}/query`, requestPayload, {
+      withCredentials: true // Include session cookie
+    })
       .pipe(
+        tap(response => {
+          // Add to query history
+          this.addToHistory({
+            ...response,
+            query: message,
+            timestamp: new Date()
+          });
+        }),
         catchError((error: HttpErrorResponse) => {
           console.error('API call failed:', error);
+          console.log('API call failed:', error);
+          
+          // Handle 401 Unauthorized
+          if (error.status === 401) {
+            this.setAuthenticationState(false);
+            return of({
+              success: false,
+              response: "Your session has expired. Please sign in again to continue.",
+              error: "Authentication required"
+            } as QueryResponse);
+          }
+          
           this.setConnectionStatus(false);
           
           // Return a user-friendly error message
           return of({
-            result: "I'm sorry, I'm having trouble connecting to the server right now. Please try again later.",
-            error: true
-          });
+            success: false,
+            response: "I'm sorry, I'm having trouble connecting to the server right now. Please try again later.",
+            error: error.message || "Connection error"
+          } as QueryResponse);
         })
       )
       .subscribe({
-        next: (response: any) => {
+        next: (response: QueryResponse) => {
           this.setConnectionStatus(true);
           this.setLoading(false);
-          
-          // Extract the response content - handle various response formats
-          let responseContent = '';
-          if (response.error && response.result) {
-            responseContent = response.result;
-          } else if (response.result) {
-            responseContent = response.result;
-          } else if (response.answer) {
-            responseContent = response.answer;
-          } else if (response.response) {
-            responseContent = response.response;
-          } else if (response.message) {
-            responseContent = response.message;
-          } else if (typeof response === 'string') {
-            responseContent = response;
-          } else {
-            responseContent = "I received your message but couldn't generate a proper response. Please try again.";
-          }
-
+          console.log(response)
+          // Create agent message with query response metadata
           const agentMessage: Message = {
             id: this.generateId(),
-            content: responseContent,
+            content: response.response || "No response received",
             timestamp: new Date(),
-            sender: 'agent'
+            sender: 'agent',
+            queryResponse: response  // Attach full query response
           };
 
           this.addMessage(agentMessage);
@@ -154,5 +193,61 @@ export class ChatService {
           this.addMessage(errorMessage);
         }
       });
+  }
+
+  /**
+   * Query History Management
+   */
+  private addToHistory(response: QueryResponse): void {
+    const history = this.queryHistorySubject.value;
+    history.unshift(response);
+    
+    // Keep only last 50 queries
+    if (history.length > 50) {
+      history.pop();
+    }
+    
+    this.queryHistorySubject.next(history);
+    this.saveHistoryToStorage(history);
+  }
+
+  private saveHistoryToStorage(history: QueryResponse[]): void {
+    if (typeof window !== 'undefined' && localStorage) {
+      try {
+        localStorage.setItem('query_history', JSON.stringify(history));
+      } catch (e) {
+        console.error('Failed to save history:', e);
+      }
+    }
+  }
+
+  loadHistoryFromStorage(): void {
+    if (typeof window !== 'undefined' && localStorage) {
+      const stored = localStorage.getItem('query_history');
+      if (stored) {
+        try {
+          const history = JSON.parse(stored);
+          this.queryHistorySubject.next(history);
+        } catch (e) {
+          console.error('Failed to parse history:', e);
+        }
+      }
+    }
+  }
+
+  clearHistory(): void {
+    this.queryHistorySubject.next([]);
+    if (typeof window !== 'undefined' && localStorage) {
+      localStorage.removeItem('query_history');
+    }
+  }
+
+  /**
+   * Replay a query from history
+   */
+  replayQuery(response: QueryResponse): void {
+    if (response.query) {
+      this.sendMessage(response.query);
+    }
   }
 }

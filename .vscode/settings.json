@@ -1,0 +1,4 @@
+{
+    "appService.defaultWebAppToDeploy": "/subscriptions/de97ddec-5ad0-432a-85dd-7f6f60d944b3/resourceGroups/ingage-ai-rnd/providers/Microsoft.Web/sites/ingage-agent-ui",
+    "appService.deploySubpath": "dist\\ingage-ai-agent-ui\\browser"
+}
