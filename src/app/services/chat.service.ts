@@ -117,13 +117,159 @@ export class ChatService {
   }
 
   /**
+   * Clean duplicate responses that may contain previous conversation content
+   * Extracts only the last/newest response from concatenated AI responses
+   */
+  private cleanDuplicateResponse(response: string): string {
+    if (!response || response.trim() === '') {
+      return response;
+    }
+
+    // Strategy 1: Look for the last unique response section
+    // Split by patterns that typically start new responses
+    const responsePatterns = [
+      /(?:\n\n|\r\n\r\n)(?=Here are the details for the [a-zA-Z]+ member)/,
+      /(?:\n\n|\r\n\r\n)(?=Here are the top \d+ members)/,
+      /(?:\n\n|\r\n\r\n)(?=Here are|These are|The following|This member|Member ID:|Based on)/,
+      /(?:\n\n|\r\n\r\n)(?=Demographic Information:|Open HEDIS Care Gaps:)/
+    ];
+
+    for (const pattern of responsePatterns) {
+      const sections = response.split(pattern);
+      if (sections.length > 1) {
+        // Get the last section which should be the most recent response
+        const lastSection = sections[sections.length - 1].trim();
+        if (lastSection.length > 50) { // Ensure it's substantial content
+          console.log(`🧹 Pattern-based cleaning: ${response.length} -> ${lastSection.length} chars`);
+          return lastSection;
+        }
+      }
+    }
+
+    // Strategy 2: Remove duplicate consecutive blocks
+    // Split into paragraphs and remove exact duplicates
+    const paragraphs = response.split(/\n\n+/);
+    const cleanedParagraphs: string[] = [];
+    const seenParagraphs = new Set<string>();
+
+    for (let i = 0; i < paragraphs.length; i++) {
+      const paragraph = paragraphs[i].trim();
+      if (!paragraph) continue;
+
+      const normalized = paragraph.toLowerCase().replace(/\s+/g, ' ');
+      
+      // Skip if we've seen this exact paragraph before
+      if (seenParagraphs.has(normalized)) {
+        console.log(`🧹 Removing duplicate paragraph: "${paragraph.substring(0, 50)}..."`);
+        continue;
+      }
+
+      seenParagraphs.add(normalized);
+      cleanedParagraphs.push(paragraph);
+    }
+
+    const dedupedResponse = cleanedParagraphs.join('\n\n');
+
+    // Strategy 3: If we removed significant duplicates, use the cleaned version
+    if (dedupedResponse.length < response.length * 0.85) {
+      console.log(`🧹 Deduplication: ${response.length} -> ${dedupedResponse.length} chars`);
+      return dedupedResponse;
+    }
+
+    // Strategy 4: Look for the last complete response based on common endings
+    const responseEndings = [
+      /Would you like more (detailed )?information.*?\?$/,
+      /Would you like.*?\?$/,
+      /\?\s*$/,
+      /\.\s*$/
+    ];
+
+    // Find all positions where complete responses might end
+    for (const ending of responseEndings) {
+      const matches = Array.from(response.matchAll(new RegExp(ending.source, 'g')));
+      if (matches.length > 1) {
+        // Take content from the second-to-last match to handle duplicate responses
+        const lastMatch = matches[matches.length - 1];
+        if (lastMatch.index !== undefined) {
+          const beforeLastResponse = response.substring(0, lastMatch.index);
+          const lastCompleteResponseStart = Math.max(
+            beforeLastResponse.lastIndexOf('\n\nHere are'),
+            beforeLastResponse.lastIndexOf('\n\nThe '),
+            beforeLastResponse.lastIndexOf('\n\nThis '),
+            beforeLastResponse.lastIndexOf('\n\nMember '),
+            0
+          );
+          
+          if (lastCompleteResponseStart > 0) {
+            const lastResponse = response.substring(lastCompleteResponseStart + 2).trim();
+            console.log(`🧹 Last response extraction: ${response.length} -> ${lastResponse.length} chars`);
+            return lastResponse;
+          }
+        }
+      }
+    }
+
+    // If no cleaning was possible, return original
+    console.log(`🧹 No cleaning needed for response (${response.length} chars)`);
+    return response;
+  }
+
+  /**
+   * Format conversation history for API request
+   * Converts Message[] to a simplified format for the backend
+   * Includes last N messages to provide context while keeping payload manageable
+   */
+  private formatConversationHistory(messages: Message[]): Array<{role: string, content: string}> {
+    // Exclude the last message (current user message), typing indicators, and welcome message
+    const previousMessages = messages
+      .filter(msg => {
+        // Filter out typing indicators
+        if (msg.isTyping) return false;
+        
+        // Filter out the welcome/greeting message (first message or messages without queryResponse)
+        // The welcome message is typically the first agent message without a queryResponse
+        if (msg.sender === 'agent' && !msg.queryResponse) return false;
+        
+        return true;
+      })
+      .slice(0, -1); // Exclude the current message (just added)
+    
+    // Limit to last 10 messages (5 exchanges) to keep context manageable
+    const contextWindow = 10;
+    const recentMessages = previousMessages.slice(-contextWindow);
+    
+    // Convert to simplified format expected by backend
+    // For agent messages, clean up any duplicate greeting text
+    return recentMessages.map(msg => {
+      let content = msg.content;
+      
+      // For agent messages, clean up any duplicate greeting text
+      if (msg.sender === 'agent') {
+        // Remove the greeting prefix if it appears (sometimes duplicated)
+        const greetingPattern = /^(Hello! I'm your Ingage AI Agent\. I'm here to help answer your questions about your data\.\s*)+/gi;
+        content = content.replace(greetingPattern, '').trim();
+      }
+      
+      return {
+        role: msg.sender === 'user' ? 'user' : 'assistant',
+        content: content
+      };
+    });
+  }
+
+  /**
    * Send query to authenticated API
    * API: POST /query
    * Requires: Authentication (cookie-based)
    */
   private sendToBackend(message: string): void {
+    // Get conversation history (excluding the current message we just added)
+    const currentMessages = this.chatStateSubject.value.messages;
+    const conversationHistory = this.formatConversationHistory(currentMessages);
+    
     const requestPayload = {
-      query: message
+      query: message,
+      conversation_history: conversationHistory
     };
 
     this.http.post<QueryResponse>(`${this.API_BASE_URL}/query`, requestPayload, {
@@ -167,13 +313,20 @@ export class ChatService {
           this.setConnectionStatus(true);
           this.setLoading(false);
           console.log(response)
+          
+          // Clean the response to remove previous conversation duplicates
+          const cleanedResponse = this.cleanDuplicateResponse(response.response || "No response received");
+          
           // Create agent message with query response metadata
           const agentMessage: Message = {
             id: this.generateId(),
-            content: response.response || "No response received",
+            content: cleanedResponse,
             timestamp: new Date(),
             sender: 'agent',
-            queryResponse: response  // Attach full query response
+            queryResponse: {
+              ...response,
+              response: cleanedResponse // Store cleaned response
+            }
           };
 
           this.addMessage(agentMessage);
