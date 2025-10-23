@@ -13,7 +13,7 @@ import { Subscription } from 'rxjs';
   template: `
     <div class="chat-container">
       <div class="chat-header">
-        <h2>Ingage AI Agent</h2>
+        <h2>inGAGE IQ</h2>
         <div class="status-indicator" [ngClass]="{'online': isConnected, 'offline': !isConnected}">
           {{ isConnected ? 'Online' : 'Offline' }}
         </div>

@@ -1,8 +1,9 @@
 import { Injectable } from '@angular/core';
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
-import { BehaviorSubject, Observable, catchError, of, tap } from 'rxjs';
+import { BehaviorSubject, Observable, catchError, of, tap, switchMap } from 'rxjs';
 import { Message, ChatState, QueryResponse, User } from '../models/chat.models';
 import { environment } from '../../environments/environment';
+import { FabricAuthService } from './fabric-auth-v3-client.service';
 
 /**
  * ChatService - API v2.0.0 Compatible
@@ -28,7 +29,10 @@ export class ChatService {
   private queryHistorySubject = new BehaviorSubject<QueryResponse[]>([]);
   public queryHistory$ = this.queryHistorySubject.asObservable();
 
-  constructor(private http: HttpClient) {
+  constructor(
+    private http: HttpClient,
+    private authService: FabricAuthService
+  ) {
     this.initializeChat();
     this.loadHistoryFromStorage();
   }
@@ -36,7 +40,7 @@ export class ChatService {
   private initializeChat(): void {
     const welcomeMessage: Message = {
       id: this.generateId(),
-      content: 'Hello! I\'m your Ingage AI Agent. I\'m here to help answer your questions about your data.',
+      content: 'Hello! I\'m your inGAGE IQ. I\'m here to help answer your questions about your data.',
       timestamp: new Date(),
       sender: 'agent'
     };
@@ -71,8 +75,39 @@ export class ChatService {
     this.addMessage(userMessage);
     this.setLoading(true);
 
-    // Make API call to backend
-    this.sendToBackend(content);
+    // Check authentication status before sending query
+    console.log('🔐 Checking authentication before sending query...');
+    this.authService.checkAuthenticationStatus().subscribe({
+      next: (authStatus) => {
+        if (authStatus.authenticated) {
+          console.log('✅ Authentication verified, sending query');
+          this.sendToBackend(content);
+        } else {
+          console.error('❌ Not authenticated, cannot send query');
+          this.setLoading(false);
+          
+          const errorMessage: Message = {
+            id: this.generateId(),
+            content: "You are not authenticated. Please sign in to continue.",
+            timestamp: new Date(),
+            sender: 'agent'
+          };
+          this.addMessage(errorMessage);
+        }
+      },
+      error: (error) => {
+        console.error('❌ Auth check failed before query:', error);
+        this.setLoading(false);
+        
+        const errorMessage: Message = {
+          id: this.generateId(),
+          content: "Authentication check failed. Please try signing in again.",
+          timestamp: new Date(),
+          sender: 'agent'
+        };
+        this.addMessage(errorMessage);
+      }
+    });
   }
 
   private addMessage(message: Message): void {
@@ -271,6 +306,12 @@ export class ChatService {
       query: message,
       conversation_history: conversationHistory
     };
+
+    console.log('📤 Sending query to backend:', {
+      endpoint: `${this.API_BASE_URL}/query`,
+      queryLength: message.length,
+      historyLength: conversationHistory.length
+    });
 
     this.http.post<QueryResponse>(`${this.API_BASE_URL}/query`, requestPayload, {
       withCredentials: true // Include session cookie

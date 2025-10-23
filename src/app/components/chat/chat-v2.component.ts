@@ -27,7 +27,7 @@ import { Subscription } from 'rxjs';
       <!-- Header with authentication status -->
       <div class="chat-header">
         <div class="header-left">
-          <h2>🤖 Ingage AI Agent</h2>
+          <h2>🤖 inGAGE IQ</h2>
           <!-- <span class="version">v2.0.0</span> -->
         </div>
         
