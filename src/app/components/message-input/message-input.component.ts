@@ -1,4 +1,4 @@
-import { Component, Output, EventEmitter } from '@angular/core';
+import { Component, Output, EventEmitter, Input } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 
@@ -12,18 +12,24 @@ import { FormsModule } from '@angular/forms';
         <textarea 
           [(ngModel)]="messageText"
           (keydown)="onKeyDown($event)"
-          placeholder="Type your message..."
+          [placeholder]="isLoading ? 'Please wait for response...' : 'Type your message...'"
           class="message-input"
           rows="1"
-          [disabled]="isDisabled"
+          [disabled]="isDisabled || isLoading"
         ></textarea>
         <button 
           (click)="sendMessage()"
-          [disabled]="!messageText.trim() || isDisabled"
+          [disabled]="!messageText.trim() || isDisabled || isLoading"
           class="send-button"
+          [class.loading]="isLoading"
           type="button"
         >
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+          <!-- Loading spinner when isLoading is true -->
+          <div *ngIf="isLoading" class="loading-spinner">
+            <div class="spinner"></div>
+          </div>
+          <!-- Send icon when not loading -->
+          <svg *ngIf="!isLoading" width="24" height="24" viewBox="0 0 24 24" fill="none">
             <path d="M2 21L23 12L2 3V10L17 12L2 14V21Z" fill="currentColor"/>
           </svg>
         </button>
@@ -104,9 +110,34 @@ import { FormsModule } from '@angular/forms';
       transform: none;
     }
 
+    .send-button.loading {
+      background: #FF9500;
+      cursor: not-allowed;
+    }
+
     .send-button svg {
       width: 20px;
       height: 20px;
+    }
+
+    .loading-spinner {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .spinner {
+      width: 16px;
+      height: 16px;
+      border: 2px solid rgba(255, 255, 255, 0.3);
+      border-top: 2px solid white;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+    }
+
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
     }
 
     /* Mobile responsiveness */
@@ -191,6 +222,7 @@ import { FormsModule } from '@angular/forms';
 })
 export class MessageInputComponent {
   @Output() messageSent = new EventEmitter<string>();
+  @Input() isLoading = false;
   
   messageText = '';
   isDisabled = false;
@@ -198,13 +230,17 @@ export class MessageInputComponent {
   onKeyDown(event: KeyboardEvent): void {
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault();
-      this.sendMessage();
+      // Only send if not loading
+      if (!this.isLoading) {
+        this.sendMessage();
+      }
     }
   }
 
   sendMessage(): void {
     const trimmedMessage = this.messageText.trim();
-    if (trimmedMessage) {
+    // Only send if not loading, not disabled, and has content
+    if (trimmedMessage && !this.isLoading && !this.isDisabled) {
       this.messageSent.emit(trimmedMessage);
       this.messageText = '';
     }

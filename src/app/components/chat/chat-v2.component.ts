@@ -129,6 +129,7 @@ import { Subscription } from 'rxjs';
       <app-message-input 
         *ngIf="authState === 'authenticated'"
         (messageSent)="onMessageSent($event)"
+        [isLoading]="isTyping"
         [class.disabled]="!isConnected">
       </app-message-input>
     </div>
