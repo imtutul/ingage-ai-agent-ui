@@ -61,6 +61,10 @@ import { Subscription } from 'rxjs';
                 <span class="user-email">{{ currentUser.email }}</span>
               </div>
             </div>
+            <button class="clear-chat-btn" (click)="onClearChat()" title="Clear Conversation" *ngIf="messages.length > 1">
+              <span class="btn-icon">🗑️</span>
+              Clear Chat
+            </button>
             <button class="logout-btn" (click)="onLogout()" title="Sign Out">
               <span class="btn-icon">🚪</span>
               Sign Out
@@ -217,7 +221,7 @@ import { Subscription } from 'rxjs';
       opacity: 0.9;
     }
 
-    .login-btn, .logout-btn, .retry-btn {
+    .login-btn, .logout-btn, .retry-btn, .clear-chat-btn {
       padding: 8px 16px;
       border: 2px solid white;
       border-radius: 20px;
@@ -232,9 +236,20 @@ import { Subscription } from 'rxjs';
       transition: all 0.2s;
     }
 
-    .login-btn:hover, .logout-btn:hover, .retry-btn:hover {
+    .login-btn:hover, .logout-btn:hover, .retry-btn:hover, .clear-chat-btn:hover {
       background: white;
       color: #667eea;
+    }
+
+    .clear-chat-btn {
+      background: rgba(255, 255, 255, 0.1);
+      border-color: rgba(255, 255, 255, 0.7);
+    }
+
+    .clear-chat-btn:hover {
+      background: rgba(255, 107, 107, 0.9);
+      border-color: #ff6b6b;
+      color: white;
     }
 
     .btn-icon {
@@ -561,6 +576,16 @@ export class ChatComponentV2 implements OnInit, AfterViewChecked, OnDestroy {
   onMessageSent(message: string): void {
     if (this.authState === 'authenticated' && message.trim()) {
       this.chatService.sendMessage(message);
+    }
+  }
+
+  /**
+   * Handle clear chat button click
+   */
+  onClearChat(): void {
+    if (confirm('Are you sure you want to clear the conversation? This action cannot be undone.')) {
+      console.log('🗑️ Clearing conversation...');
+      this.chatService.clearChat();
     }
   }
 
